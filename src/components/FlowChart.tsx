@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   ReactFlow,
   Controls,
@@ -11,6 +11,8 @@ import {
   type NodeMouseHandler,
   BackgroundVariant,
 } from '@xyflow/react';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 interface ProcessInfo {
   title: string;
@@ -25,6 +27,7 @@ interface FlowChartProps {
 }
 
 export default function FlowChart({ initialNodes, initialEdges, processInfo }: FlowChartProps) {
+  const flowWrapperRef = useRef<HTMLDivElement | null>(null);
   const [nodes, , onNodesChange] = useNodesState(initialNodes);
   const [edges, , onEdgesChange] = useEdgesState(initialEdges);
   const [selectedNode, setSelectedNode] = useState<Node | null>(null);
@@ -37,31 +40,104 @@ export default function FlowChart({ initialNodes, initialEdges, processInfo }: F
     setSelectedNode(null);
   }, []);
 
+  const getExportFileName = (extension: 'png' | 'pdf') => {
+    const slug = processInfo.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    return `${slug}-${timestamp}.${extension}`;
+  };
+
+  const captureFlowChart = useCallback(async () => {
+    if (!flowWrapperRef.current) {
+      return null;
+    }
+
+    return html2canvas(flowWrapperRef.current, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    });
+  }, []);
+
+  const exportAsPng = useCallback(async () => {
+    const canvas = await captureFlowChart();
+    if (!canvas) {
+      return;
+    }
+
+    const dataUrl = canvas.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.href = dataUrl;
+    link.download = getExportFileName('png');
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, [captureFlowChart, getExportFileName]);
+
+  const exportAsPdf = useCallback(async () => {
+    const canvas = await captureFlowChart();
+    if (!canvas) {
+      return;
+    }
+
+    const dataUrl = canvas.toDataURL('image/png');
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imgProps = pdf.getImageProperties(dataUrl);
+    const ratio = Math.min(pageWidth / imgProps.width, pageHeight / imgProps.height);
+    const imgWidth = imgProps.width * ratio;
+    const imgHeight = imgProps.height * ratio;
+    const marginX = (pageWidth - imgWidth) / 2;
+    const marginY = (pageHeight - imgHeight) / 2;
+
+    pdf.addImage(dataUrl, 'PNG', marginX, marginY, imgWidth, imgHeight);
+    pdf.save(getExportFileName('pdf'));
+  }, [captureFlowChart, getExportFileName]);
+
   return (
     <div className="flex h-full">
       {/* Flow area */}
       <div className="flex-1 relative">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onNodeClick={onNodeClick}
-          onPaneClick={onPaneClick}
-          fitView
-          fitViewOptions={{ padding: 0.2 }}
-          attributionPosition="bottom-left"
-        >
-          <Controls position="bottom-right" />
-          <MiniMap
-            nodeStrokeWidth={3}
-            zoomable
-            pannable
-            position="bottom-left"
-            style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}
-          />
-          <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e2e8f0" />
-        </ReactFlow>
+        <div className="flex items-center justify-end gap-2 px-4 pt-4 pb-2">
+          <button
+            type="button"
+            onClick={exportAsPng}
+            className="cursor-pointer rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+          >
+            Export PNG
+          </button>
+          <button
+            type="button"
+            onClick={exportAsPdf}
+            className="cursor-pointer rounded-lg border border-slate-200 bg-slate-900 px-3 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-400"
+          >
+            Export PDF
+          </button>
+        </div>
+        <div ref={flowWrapperRef} className="h-[calc(100%-3.5rem)] overflow-hidden rounded-3xl bg-white shadow-sm" style={{ minHeight: 0 }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            fitView
+            fitViewOptions={{ padding: 0.2 }}
+            attributionPosition="bottom-left"
+          >
+            <Controls position="bottom-right" />
+            <MiniMap
+              nodeStrokeWidth={3}
+              zoomable
+              pannable
+              position="bottom-left"
+              style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8 }}
+            />
+            <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#e2e8f0" />
+          </ReactFlow>
+        </div>
       </div>
 
       {/* Detail panel */}
